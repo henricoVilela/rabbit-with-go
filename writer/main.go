@@ -1,18 +1,29 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 type Message struct {
 	System      string `json:"system"`
 	EmployeeID  int    `json:"employee_id"`
 	MessageBody string `json:"message_body"`
+}
+
+type AuditLog struct {
+	Message   string    `bson:"message"`
+	Timestamp time.Time `bson:"timestamp"`
+	Status    string    `bson:"status"`
+	RouterKey string    `bson:"router_key"`
 }
 
 func failOnError(err error, msg string) {
@@ -58,6 +69,8 @@ func main() {
 		})
 	failOnError(err, "Failed to publish a message")
 	log.Printf(" [x] Sent %s", body)
+
+	recordMessage(string(body), routing)
 }
 
 func initQueuesExchange(ch *amqp.Channel) {
@@ -100,5 +113,31 @@ func initQueuesExchange(ch *amqp.Channel) {
 		)
 		failOnError(err, "Falha ao fazer o bind da fila "+queue)
 	}
+}
 
+func recordMessage(message string, routing string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	mongoClient, err := mongo.Connect(ctx, options.Client().ApplyURI("mongodb://localhost:27017"))
+	if err != nil {
+		log.Fatalf("Falha ao conectar ao MongoDB: %v", err)
+	}
+	defer mongoClient.Disconnect(ctx)
+
+	mongoCollection := mongoClient.Database("audit").Collection("logs")
+
+	auditLog := AuditLog{
+		Message:   message,
+		Timestamp: time.Now(),
+		Status:    "Enviado para RabbitMQ com sucesso",
+		RouterKey: routing,
+	}
+
+	_, err = mongoCollection.InsertOne(ctx, auditLog)
+	if err != nil {
+		log.Fatalf("Falha ao inserir registro no MongoDB: %v", err)
+	} else {
+		fmt.Println("Mensagem enviada e registrada com sucesso!")
+	}
 }

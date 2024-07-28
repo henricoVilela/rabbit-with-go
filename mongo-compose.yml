@@ -1,0 +1,8 @@
+services:
+  mongodb:
+    image: mongo:latest
+    container_name: mongo_container
+    ports:
+      - "27017:27017"
+    volumes:
+      - /opt/mongodb/data:/data/db
